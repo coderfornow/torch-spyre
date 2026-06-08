@@ -3888,6 +3888,57 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
                 "4d_dim3": (3, cached_randn((2, 4, 8, 64))),
             },
         },
+        # storage_offset fix (issue #1476): compiled kernels were reading from the
+        # storage base, ignoring any non-zero offset produced by slicing.
+        ("test_storage_offset_stick_aligned", "test_storage_offset_binary_op"): {
+            # (offset_elements * sizeof(fp16)) % 128 == 0
+            # Code path: tensor_byte_offsets via executeProgramAsync (C++ fast-path)
+            "ops_dict": {"add": torch.add, "sub": torch.sub, "mul": torch.mul},
+            "param_sets": {
+                "1d_off64": (
+                    cached_randn((320,), differentiation="sa_x"),
+                    cached_randn((320,), differentiation="sa_y"),
+                    64,  # byte_offset = 128 (1 stick)
+                ),
+                "1d_off128": (
+                    cached_randn((384,), differentiation="sa_x"),
+                    cached_randn((384,), differentiation="sa_y"),
+                    128,  # byte_offset = 256 (2 sticks)
+                ),
+                "2d_off1": (
+                    cached_randn((5, 256), differentiation="sa_x"),
+                    cached_randn((5, 256), differentiation="sa_y"),
+                    1,  # row stride = 256 fp16 → byte_offset = 512 (4 sticks)
+                ),
+                "3d_off1": (
+                    cached_randn((3, 4, 256), differentiation="sa_x"),
+                    cached_randn((3, 4, 256), differentiation="sa_y"),
+                    1,  # row stride = 1024 fp16 → byte_offset = 2048 (16 sticks)
+                ),
+            },
+        },
+        ("test_storage_offset_sub_stick", "test_storage_offset_binary_op"): {
+            # (offset_elements * sizeof(fp16)) % 128 != 0
+            # Code path: CPU round-trip materialization in _normalize_storage_offset
+            "ops_dict": {"add": torch.add, "sub": torch.sub, "mul": torch.mul},
+            "param_sets": {
+                "1d_off3": (
+                    cached_randn((259,), differentiation="ss_x"),
+                    cached_randn((259,), differentiation="ss_y"),
+                    3,  # byte_offset = 6
+                ),
+                "1d_off67": (
+                    cached_randn((323,), differentiation="ss_x"),
+                    cached_randn((323,), differentiation="ss_y"),
+                    67,  # byte_offset = 134, 67 % 64 == 3
+                ),
+                "2d_off1_w67": (
+                    cached_randn((5, 67), differentiation="ss_x"),
+                    cached_randn((5, 67), differentiation="ss_y"),
+                    1,  # row stride = 67 fp16 → byte_offset = 134
+                ),
+            },
+        },
     }
 
     def __init__(self, *args, **kwargs):
@@ -3949,6 +4000,16 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             b[tiny_value_mask] = FP16_EPS
 
         self.compare_with_cpu(op, a, b)
+
+    def test_storage_offset_binary_op(self, op, x_base, y_base, offset):
+        # x_base[offset:] / y_base[offset:] carry a non-zero storage_offset.
+        # Two fix paths covered by the stick-aligned and sub-stick param sets:
+        #   stick-aligned — tensor_byte_offsets forwarded in executeProgramAsync
+        #   sub-stick     — CPU round-trip in _normalize_storage_offset
+        def fn(x, y):
+            return op(x[offset:], y[offset:])
+
+        self.compare_with_cpu(fn, x_base, y_base, clone_inputs=True, run_eager=False)
 
     @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
     def test_fallback_binary_op_cpu(self, op, x, y):
