@@ -512,6 +512,105 @@ class BroadcastAsyncFallback(ir.ExternKernel):
         V.graph.register_operation(self)
 
 
+class AllReduceAsyncFallback(ir.ExternKernel):
+    """IR node for spyre.all_reduce_async.
+
+    Starts the all_reduce operation asynchronously and returns immediately.
+    Output tensor has shape[0] = input.shape[0]
+    """
+
+    def codegen(self, wrapper):
+        input_name = self.inputs[0].codegen_reference()
+        reduce_op, group_name = self.constant_args
+        output_name = self.get_name()
+        wrapper.writeline(
+            f"{output_name} = torch.ops.spyre.all_reduce_async("
+            f"{input_name}, '{reduce_op}', '{group_name}')"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        return []
+
+    def get_unbacked_symbol_defs(self):
+        return OrderedSet()
+
+    def __init__(
+        self,
+        op_overload: torch._ops.OpOverload,
+        x: IRNode,
+        reduce_op: str,
+        group_name: str,
+    ) -> None:
+        x_device = x.get_device()
+        x_dtype = x.get_dtype()
+        x_size = x.get_size()
+        x_stride = x.get_stride()
+        layout = FixedLayout(x_device, x_dtype, x_size, x_stride)
+        super().__init__(
+            None,
+            layout,
+            [x],
+            (reduce_op, group_name),
+            python_kernel_name="torch.ops.spyre.all_reduce_async",
+            op_overload=op_overload,
+        )
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+
+class AllReduceInPlaceFallback(ir.ExternKernel):
+    """IR node for in-place _c10d_functional.all_reduce_.
+
+    Emits a synchronous all_reduce (async + wait) that mutates the input buffer.
+    Used when Inductor's reinplace pass converts the functional all_reduce to
+    the in-place variant before our lowering can intercept it.
+    """
+
+    def codegen(self, wrapper):
+        input_name = self.inputs[0].codegen_reference()
+        reduce_op, group_name = self.constant_args
+        output_name = self.get_name()
+        wrapper.writeline(
+            f"{output_name} = torch.ops.spyre.all_reduce_async("
+            f"{input_name}, '{reduce_op}', '{group_name}')"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        return []
+
+    def get_unbacked_symbol_defs(self):
+        return OrderedSet()
+
+    def __init__(
+        self,
+        op_overload: torch._ops.OpOverload,
+        x: IRNode,
+        reduce_op: str,
+        group_name: str,
+    ) -> None:
+        x_device = x.get_device()
+        x_dtype = x.get_dtype()
+        x_size = x.get_size()
+        x_stride = x.get_stride()
+        layout = FixedLayout(x_device, x_dtype, x_size, x_stride)
+        super().__init__(
+            None,
+            layout,
+            [x],
+            (reduce_op, group_name),
+            python_kernel_name="torch.ops.spyre.all_reduce_async",
+            op_overload=op_overload,
+        )
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+
 class WaitWorkFallback(ir.ExternKernel):
     """IR node for spyre.wait_work — emits a runtime call to synchronize async operation.
 
@@ -521,13 +620,9 @@ class WaitWorkFallback(ir.ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        # Get input tensor name (the tensor from broadcast_async)
         input_tensor = self.inputs[0]
         input_name = input_tensor.codegen_reference()
 
-        print(f"  Input tensor: {input_name}")
-
-        # Generate the wait call
         output_name = self.get_name()
         generated_code = f"{output_name} = torch.ops.spyre.wait_work({input_name})"
 

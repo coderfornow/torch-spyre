@@ -22,3 +22,11 @@ def _(x: torch.Tensor, src_rank: int = 0, group_name: str = "default") -> torch.
 def _(x: torch.Tensor) -> torch.Tensor:
     """Fake implementation — pass through the tensor."""
     return x
+
+
+@torch.library.register_fake("spyre::all_reduce_async")
+def _(
+    x: torch.Tensor, reduce_op: str = "sum", group_name: str = "default"
+) -> torch.Tensor:
+    """In-place op — returns the same tensor (mutated on device)."""
+    return x
