@@ -534,7 +534,8 @@ class AllReduceAsyncFallback(ir.ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return []
+        # The Spyre runtime reduces in-place into the input buffer.
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return OrderedSet()
