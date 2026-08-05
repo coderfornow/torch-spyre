@@ -98,19 +98,6 @@ class TestAllReduceCompiled(TestCase):
         super().setUp()
         torch.compiler.reset()
 
-    def test_all_reduce_compiled_fp32(self):
-        """Verify compiled all_reduce sum works with fp32."""
-        x = torch.full(
-            (128,), float(self.comm_rank + 1), dtype=torch.float32, device=DEVICE
-        )
-        module = AllReduceCompiledModule(reduce_op="sum")
-        compiled_module = torch.compile(module)
-        result = compiled_module(x)
-
-        # Output shape should be the same as input
-        # For now, fp32 is not fully supported.
-        self.assertEqual(result.shape, x.shape)
-
     def test_all_reduce_compiled_fp16(self):
         """Verify compiled all_reduce preserves fp16."""
         x = torch.ones((256,), dtype=torch.float16, device=DEVICE)

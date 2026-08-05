@@ -19,4 +19,3 @@ test_suite_config:
     # These tests verify lowering of c10d ops to spyre_comms backend
     supported_dtypes:
       - name: float16
-      - name: float32

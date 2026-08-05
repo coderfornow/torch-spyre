@@ -21,7 +21,6 @@ from .ir import (
     SpyreConstantFallback,
     SpyreEmptyFallback,
     AllReduceAsyncFallback,
-    AllReduceInPlaceFallback,
     BroadcastAsyncFallback,
     WaitWorkFallback,
 )
@@ -1470,7 +1469,6 @@ def _iter_computed_buffers(operations: list[Operation]):
                     BroadcastAsyncFallback,
                     WaitWorkFallback,
                     AllReduceAsyncFallback,
-                    AllReduceInPlaceFallback,
                 ),
             ):
                 # Work division not supported on collective kernels

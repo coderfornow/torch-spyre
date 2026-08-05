@@ -41,7 +41,6 @@ from .ir import (
     BroadcastAsyncFallback,
     WaitWorkFallback,
     AllReduceAsyncFallback,
-    AllReduceInPlaceFallback,
 )
 from torch_spyre._C import get_elem_in_stick
 from torch._inductor.virtualized import V
@@ -1633,17 +1632,17 @@ def lower_c10d_all_reduce_inplace(tensor, reduce_op, group_name):
 
     Inductor's reinplace pass converts the functional all_reduce to the in-place
     all_reduce_ when the output shape matches the input. This lowering catches
-    that case and emits a synchronous Spyre all_reduce (async + wait).
+    that case and emits the same Spyre all_reduce op (always in-place on device).
     """
     tensor.realize()
     logger.debug(
-        "Lowering _c10d_functional.all_reduce_ to AllReduceInPlaceFallback "
+        "Lowering _c10d_functional.all_reduce_ to AllReduceAsyncFallback "
         "(reduce_op=%s, group_name='%s')",
         reduce_op,
         group_name,
     )
     return ir.TensorBox.create(
-        AllReduceInPlaceFallback(
+        AllReduceAsyncFallback(
             torch.ops._c10d_functional.all_reduce_.default,
             tensor,
             reduce_op,

@@ -515,58 +515,10 @@ class BroadcastAsyncFallback(ir.ExternKernel):
 class AllReduceAsyncFallback(ir.ExternKernel):
     """IR node for spyre.all_reduce_async.
 
-    Starts the all_reduce operation asynchronously and returns immediately.
-    Output tensor has shape[0] = input.shape[0]
-    """
-
-    def codegen(self, wrapper):
-        input_name = self.inputs[0].codegen_reference()
-        reduce_op, group_name = self.constant_args
-        output_name = self.get_name()
-        wrapper.writeline(
-            f"{output_name} = torch.ops.spyre.all_reduce_async("
-            f"{input_name}, '{reduce_op}', '{group_name}')"
-        )
-
-    def should_allocate(self):
-        return False
-
-    def get_mutation_names(self):
-        return []
-
-    def get_unbacked_symbol_defs(self):
-        return OrderedSet()
-
-    def __init__(
-        self,
-        op_overload: torch._ops.OpOverload,
-        x: IRNode,
-        reduce_op: str,
-        group_name: str,
-    ) -> None:
-        x_device = x.get_device()
-        x_dtype = x.get_dtype()
-        x_size = x.get_size()
-        x_stride = x.get_stride()
-        layout = FixedLayout(x_device, x_dtype, x_size, x_stride)
-        super().__init__(
-            None,
-            layout,
-            [x],
-            (reduce_op, group_name),
-            python_kernel_name="torch.ops.spyre.all_reduce_async",
-            op_overload=op_overload,
-        )
-        self.name = V.graph.register_buffer(self)
-        V.graph.register_operation(self)
-
-
-class AllReduceInPlaceFallback(ir.ExternKernel):
-    """IR node for in-place _c10d_functional.all_reduce_.
-
-    Emits a synchronous all_reduce (async + wait) that mutates the input buffer.
-    Used when Inductor's reinplace pass converts the functional all_reduce to
-    the in-place variant before our lowering can intercept it.
+    Emits a call to the synchronous in-place all_reduce runtime op and returns
+    the same buffer. Used by both the functional (_c10d_functional.all_reduce)
+    and in-place (_c10d_functional.all_reduce_) lowerings — the generated code
+    is identical since the Spyre runtime always operates in-place.
     """
 
     def codegen(self, wrapper):
