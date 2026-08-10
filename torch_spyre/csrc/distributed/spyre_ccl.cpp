@@ -474,6 +474,8 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::allreduce(
                            " Actual: " + std::to_string(opts.reduceOp);
     TORCH_CHECK(false, _err_msg);
   }
+  // Spyre Comms only supports float16 tensors because of the 'op' path
+  // through the compiler. The data transfers do not have this restriction.
   if (spyre::torchScalarToString[tensors[0].scalar_type()] != "float16") {
     std::string _err_msg =
         "[" + getBackendName() + "]: Allreduce only supports float16 tensors." +
@@ -598,6 +600,8 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::reduce(
                            " Actual: " + std::to_string(opts.reduceOp);
     TORCH_CHECK(false, _err_msg);
   }
+  // Spyre Comms only supports float16 tensors because of the 'op' path
+  // through the compiler. The data transfers do not have this restriction.
   if (spyre::torchScalarToString[tensors[0].scalar_type()] != "float16") {
     std::string _err_msg =
         "[" + getBackendName() + "]: Reduce only supports float16 tensors." +
