@@ -36,9 +36,13 @@
 
 namespace spyre {
 
+// Identifies which collective produced the pending work
+enum class CollectiveKind { Broadcast, AllReduce };
+
 // Structure to hold pending async work
 struct PendingWork {
   std::shared_ptr<spyre_comms::WorkSchedule> work;
+  CollectiveKind kind;
 };
 
 // Global map to track pending async operations
@@ -157,11 +161,6 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
   spyre_comms::Tensor buffer_tensor(tensor_info);
   buffer_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  // Synchronize compute stream: ensure any pending SDSC kernels have
-  // completed before starting communication.
-  auto stream = getCurrentStream(input.device());
-  stream.synchronize();
-
   // Start broadcast (non-blocking)
   auto work_schedule = context->broadcast(
       buffer_tensor, static_cast<spyre_comms::process_id_t>(src_rank));
@@ -177,7 +176,8 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "broadcast_async called twice on the same allocation without "
                 "intervening wait_work");
-    pending_work_map_.emplace(ctx, PendingWork{std::move(work_schedule)});
+    pending_work_map_.emplace(
+        ctx, PendingWork{std::move(work_schedule), CollectiveKind::Broadcast});
     DEBUGINFO("Stored PendingWork at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
@@ -196,8 +196,8 @@ spyre_comms::SpyreReductionOpType parse_reduce_op(
 }
 
 // All_reduce implementation — operates in-place on the input buffer.
-// Synchronous: Spyre compute hardware cannot operate concurrently with
-// active communication, so we must complete the reduction before returning.
+// Non-blocking: starts the reduction and returns immediately; the caller
+// must use wait_work to block until the operation completes.
 at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
                                       const std::string& reduce_op,
                                       const std::string& group_name) {
@@ -243,31 +243,20 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
                                    input.storage().data_ptr().get());
   inout_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  // Synchronize compute stream: ensure any pending SDSC kernels that wrote
-  // to this buffer have completed before starting communication.
-  auto stream = getCurrentStream(input.device());
-  stream.synchronize();
-
-  // Run all_reduce synchronously — device cannot overlap compute and comms
   auto work_schedule = context->allreduce(inout_tensor, op_type);
   TORCH_CHECK(work_schedule != nullptr,
               "All_reduce operation failed to create work schedule");
 
   work_schedule->start();
-  work_schedule->wait();
 
-  // Synchronize compute stream after communication completes: the compute
-  // hardware cannot start new kernels until the communication fabric has
-  // fully released resources.
-  stream.synchronize();
-
-  // Store a completed entry so wait_work can find it (nullptr = already waited)
+  // Store WorkSchedule in map for later wait_work call
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "all_reduce_async called twice on the same "
                 "allocation without intervening wait_work");
-    pending_work_map_.emplace(ctx, PendingWork{nullptr});
+    pending_work_map_.emplace(
+        ctx, PendingWork{std::move(work_schedule), CollectiveKind::AllReduce});
     DEBUGINFO("Stored PendingWork for all_reduce at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
@@ -302,14 +291,10 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
   }
 
   // Lock released — concurrent wait_work and broadcast_async can now proceed
-  if (work_to_wait) {
-    work_to_wait->wait();
-    DEBUGINFO("WorkSchedule wait completed");
-  } else {
-    DEBUGINFO("WorkSchedule already completed (synchronous collective)");
-  }
+  work_to_wait->wait();
+  DEBUGINFO("WorkSchedule wait completed");
 
-  // Return the input tensor (already has the broadcasted data)
+  // Return the tensor with completed collective data (broadcast or allreduce)
   return tensor;
 }
 

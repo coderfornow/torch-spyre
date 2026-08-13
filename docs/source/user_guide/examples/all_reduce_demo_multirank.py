@@ -1,12 +1,19 @@
+import os
+
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 
+import torch_spyre  # noqa: F401
+
 
 def run_demo():
-    device = torch.device("spyre")
+    torch.spyre._impl._lazy_init()
 
-    dist.init_process_group(backend="gloo")
+    rank = int(os.environ.get("RANK", "0"))
+    device = torch.device(f"spyre:{rank}")
+
+    dist.init_process_group("cpu:gloo,spyre:spyreccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 
