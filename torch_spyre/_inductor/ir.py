@@ -515,10 +515,11 @@ class BroadcastAsyncFallback(ir.ExternKernel):
 class AllReduceAsyncFallback(ir.ExternKernel):
     """IR node for spyre.all_reduce_async.
 
-    Emits a call to the synchronous in-place all_reduce runtime op and returns
-    the same buffer. Used by both the functional (_c10d_functional.all_reduce)
-    and in-place (_c10d_functional.all_reduce_) lowerings — the generated code
-    is identical since the Spyre runtime always operates in-place.
+    Emits an asynchronous in-place all_reduce that must be paired with a
+    subsequent wait_work call to synchronize. Used by both the functional
+    (_c10d_functional.all_reduce) and in-place (_c10d_functional.all_reduce_)
+    lowerings — the generated code is identical since the Spyre runtime always
+    operates in-place.
     """
 
     def codegen(self, wrapper):
